@@ -1,0 +1,41 @@
+import requests
+from datetime import datetime
+
+def get_nppes_effective_date(npi):
+    """Fetches the official NPI effective/activation date from NPPES."""
+    url = f"https://npiregistry.cms.hhs.gov/api/?number={npi}&version=2.1"
+    response = requests.get(url).json()
+    if response.get('result_count', 0) > 0:
+        # NPPES uses 'enumeration_date' as the foundation
+        date_str = response['results'][0]['basic']['enumeration_date']
+        return datetime.strptime(date_str, '%Y-%m-%d')
+    return None
+
+def generate_velocity_tracker(provider_list):
+    """Generates a tracking report for all providers in the onboarding pipeline."""
+    report = []
+    current_date = datetime.now()
+
+    for provider in provider_list:
+        npi = provider['npi']
+        nppes_date = get_nppes_effective_date(npi)
+        
+        # Validation: Ensure we have a valid NPI activation date to start the clock
+        if not nppes_date:
+            status = "PENDING NPI ACTIVATION"
+            velocity_days = 0
+        else:
+            # Measure days since legal activation vs. current status
+            velocity_days = (current_date - nppes_date).days
+            status = provider.get('payer_status', 'IN_PROCESS')
+
+        report.append({
+            "provider_name": provider['name'],
+            "npi": npi,
+            "nppes_effective_date": nppes_date.strftime('%Y-%m-%d') if nppes_date else "N/A",
+            "days_in_pipeline": velocity_days,
+            "revenue_readiness_score": "100%" if status == "ACTIVE" else "0%",
+            "alert": "VELOCITY LAG" if velocity_days > 60 and status != "ACTIVE" else "ON TRACK"
+        })
+    
+    return report
